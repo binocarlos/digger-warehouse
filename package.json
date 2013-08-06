@@ -1,6 +1,6 @@
 {
   "name": "digger-warehouse",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "The server side request handler for digger",
   "main": "src/index.js",
   "scripts": {
