@@ -25,267 +25,70 @@
  * Module dependencies.
  */
 
-
-var utils = require('digger-utils');
-var _ = require('lodash');
-var async = require('async');
 var EventEmitter = require('events').EventEmitter;
-var Container = require('digger-container');
 var Router = require('./router');
 var util = require('util');
+var Mini = require('miniware');
 
 // prototype
 
-function Warehouse(){}
-
-util.inherits(Warehouse, EventEmitter);
-
 module.exports = function factory(){
 
-  function app(req, res, next){
-    app.handle.apply(app, [req, res, next]);
+  var app = Mini();
+  var router = Router();
+
+  function handler(req, reply, next){
+    app(req, reply, function(){
+      router(req, reply, next || function(){
+        reply('404:route not found')
+      });
+    });
   }
 
-  app.__proto__ = new Warehouse;
-  app.initialize();
-
-  for (var i = 0; i < arguments.length; ++i) {
-    app.use(arguments[i]);
-  }
-
-  return app;
-}
-
-Warehouse.prototype.initialize = function(){
-  this.route = '/';
-  this.stack = [];
-  this._router = Router();
-  this._prepared = true;
-  this._preparestack = [];
-}
-
-/*
-
-  some warehouses need to get stuff ready before they start
-  processing requests
-
-    warehouse.prepare(function(finished){
-      ... do stuff perhaps async
-      finished();
-    })
-  
-*/
-
-Warehouse.prototype.prepare = function(setupfn){
-  var self = this;
-  this._prepared = false;
-  setupfn(function(){
-    self._prepared = true;
-    var callbacks = self._preparestack;
-    self._preparestack = [];
-    async.forEach(callbacks, function(fn, nextfn){
-      fn();
-      nextfn();
-    }, function(){
-
-    })
-  })
-}
-
-/*
-
-  I totally stole the connect middleware stack
-
- */
-
-Warehouse.prototype.security = function(fn){
-  this.use('before', fn);
-}
-
-Warehouse.prototype.use = function(route, fn){
-  if(route==='before'){
-    this.stack.unshift({ route: '/', handle: fn });
-    return this;
-  }
-  // default route to '/'
-  if ('string' != typeof route) {
-    fn = route;
-    route = '/';
-  }
-
-  // wrap sub-apps
-  if ('function' == typeof fn.handle) {
-    var server = fn;
-    fn.route = route;
-    fn = function(req, res, next){
-      server.handle(req, res, next);
-    };
-  }
-
-  // wrap dispatch configs
-  if ('object' == typeof fn){
-    this._router.use(route, fn);
-    return this;
-  }
+  handler.__proto__ = new EventEmitter;
 
   /*
-  if (fn instanceof http.Server) {
-    fn = fn.listeners('request')[0];
-  }
-  */
-
-  // strip trailing slash
-  if ('/' == route[route.length - 1]) {
-    route = route.slice(0, -1);
-  }
-
-  // add the middleware
-  this.stack.push({ route: route, handle: fn });
-
-  return this;
-};
-
-_.each([
-  'head',
-  'get',
-  'post',
-  'put',
-  'del'
-], function(method){
-
-  Warehouse.prototype[method] = function(route, fn) {
-
-    this._router[method].apply(this._router, [route, fn]);
-    return this;
-
-  }
-
-})
-
-/*
- 
-  a total ripoff of the connect middleware handler
-
- */
-
-Warehouse.prototype.handle = function(req, res, parentout) {
-
-  var self = this;
-
-  function finish(err){
-
-    if(res.headerSent){
-      return;
-    }
-
-    if(err){
-      res.sendError(err);
-      return;
-    }
-
-    self._router(req, res, function(){
-      if(parentout){
-        parentout(req, res);
-      }
-      else{
-        res.send404(req);
-      }
-    })
-  }
-
-  if(!this._prepared){
-    this._preparestack.push(function(){
-      self.handle(req, res, parentout);
-    })
-    return;
-  }
-
-  if(!req.getHeader('x-original-url')){
-    req.setHeader('x-original-url', req.url);
-  }
-
-  this.emit('request', req, res);
-
-  var stack = this.stack;
-  var removed = '';
-  var slashAdded = false;
-  var index = 0;
-
-  function next(err) {
-    var layer, url, status, c;
-
-    if (slashAdded) {
-      req.pathname = req.pathname.substr(1);
-      slashAdded = false;
-    }
-
-    req.pathname = removed + req.pathname;
-    removed = '';
-
-    // next callback
-    layer = stack[index];
-    index++;
-
-    // all done
-    if (!layer || res.headerSent) {
-
-      finish(err);
-      
-      return;
-    }
-
-    /*
+  
+    wrap the mini use so we get paths also
     
-      THIS SHOULD BE TURNED BACK ON!!!
-      
-    */
-    try {
+  */
+  handler.use = function(path, fn){
+    if(path=='before'){
+      app.before(fn);
+      return;
+    }
 
-      url = req.pathname;
-
-      if (undefined === url) url = '/';
-
-      // skip this layer if the route doesn't match.
-      if (0 !== url.toLowerCase().indexOf(layer.route.toLowerCase())) return next(err);
-
-      c = url[layer.route.length];
-      if (c && '/' != c && '.' != c) return next(err);
-
-      // Call the layer handler
-      // Trim off the part of the url that matches the route
-      removed = layer.route;
-      req.pathname = req.pathname.substr(removed.length);  
-
-      
-      // Ensure leading slash
-      if ('/' != req.pathname[0]) {
-        req.pathname = '/' + req.pathname;
-        slashAdded = true;
-      }
-
-      var arity = layer.handle.length;
-      
-      if (err) {
-        if (arity === 4) {
-          layer.handle(err, req, res, next);
-        } else {
-          next(err);
+    if(arguments.length<=1){
+      app.use(path);
+    }
+    else{
+      app.use(function(req, reply, next){
+        if(req.url.indexOf(path)!==0){
+          next();
         }
-      } else if (arity < 4) {
-        layer.handle(req, res, next);
-      } else {
-        next();
-      }
-    } catch (e) {
-      console.log('-------------------------------------------');
-      console.log('-------------------------------------------');
-      console.log('ERROR');
-      console.dir(e);
-      console.log(e.stack);
-      
-      throw e;
-      //next(e);
+        else{
+          req.url = req.url.substr(path.length);
+          if(req.url.length==0){
+            req.url = '/';
+          }
+          fn(req, reply, next);
+        }
+      })
     }
   }
-  next();
-};
+
+  var methods = ['get','post','put','del'];
+
+  methods.forEach(function(method){
+
+    handler[method] = function(route, fn) {
+
+      router[method].apply(router, [route, fn]);
+      return app;
+
+    }
+
+  })
+
+  return handler;
+}

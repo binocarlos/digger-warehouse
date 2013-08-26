@@ -1,5 +1,4 @@
 var url = require('url');
-var _ = require('lodash');
 
 /*
  * Accepts a nested set of object literals and creates a single-level object
@@ -66,15 +65,16 @@ function splitURL(url) {
 function compile_routes(urls){
     var compiled = compileKeys(flattenKeys(urls));
     return function(req, res, next){
+
         if(!compiled.some(function(x){
 
-            var match = x[0].exec(req.pathname);
-            
+            var match = x[0].exec(req.url || '/');
+
             if (match) {
                 if (!x[1] || x[1] === req.method) {
                     var paramfields = x[x.length-1];
                     var params = {};
-                    _.each(match.slice(1), function(val, i){
+                    (match.slice(1)).forEach(function(val, i){
                         params[paramfields[i]] = val;
                     })
                     req.params = params;
@@ -120,13 +120,9 @@ module.exports = function(){
         'del':'delete'
     }
 
-    _.each([
-      'head',
-      'get',
-      'post',
-      'put',
-      'del'
-    ], function(method){
+    var methods = ['get','post','put','del'];
+
+    methods.forEach(function(method){
 
       ret[method] = function(route, fn) {
 
