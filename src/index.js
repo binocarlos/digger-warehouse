@@ -63,6 +63,7 @@ module.exports = function factory(){
     }
     else{
       app.use(function(req, reply, next){
+        req.url = req.url || '/';
         if(req.url.indexOf(path)!==0){
           next();
         }
