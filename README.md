@@ -3,6 +3,7 @@ digger-warehouse
 
 A very simple middleware chain for plain rpc requests
 
+
 ## installation
 
 	$ npm install digger-warehouse --save
